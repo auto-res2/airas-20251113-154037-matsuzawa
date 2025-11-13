@@ -763,7 +763,46 @@
     "iterations": [
       {
         "iteration_id": 1,
-        "method": "LANCER – Layer-wise Adaptive Noise-Curvature Estimation for LR 1  Running statistics   For every trainable matrix W_ℓ keep (as in DTND) short- and long-horizon EMA of first/second gradient moments m_s,v_s and m_l,v_l (β_s = 0.5, β_l = 0.995). 2  Online curvature   Every K = 64 optimisation steps estimate the layer’s largest Hessian eigenvalue λ̂_ℓ by one Hutchinson-powered iteration:   v ← Rademacher(‖W_ℓ‖),   g₁ ← ∂L/∂W_ℓ         (back-prop cached),   g₂ ← ∂L/∂W_ℓ ( W_ℓ + εv )       (one extra fw/bw pass with ε=1e-3‖W_ℓ‖/‖v‖),   λ̂_ℓ = ⟨g₂ − g₁ , v⟩ / ε .   Cost: one extra backward every 64 steps. 3  Dual-criteria LR   Let μ_slow,ℓ = (v_l − m_l²)/(‖m_l‖² + ε); set   η_ℓ = κ / ( √μ_slow,ℓ + α λ̂_ℓ ) ,   with κ=1 (noise-free optimum) and α=0.3 a *single* global constant. 4  Trust-region guard   Clip per-step log change of η_ℓ by ±0.2 during first 300 updates. 5  Self-freezing   If λ̂_ℓ<λ_freeze (2e-4) *and* μ_slow,ℓ<μ_freeze (1e-5) for 256 steps, set η_ℓ=0. 6  Batch-size reflex   When median μ_fast across active layers <5e-4 double grad-acc steps once. No other hyper-parameters are exposed – α, β_s, β_l, κ fixed a-priori."
+        "method": "LANCER – Layer-wise Adaptive Noise-Curvature Estimation for LR 1  Running statistics   For every trainable matrix W_ℓ keep (as in DTND) short- and long-horizon EMA of first/second gradient moments m_s,v_s and m_l,v_l (β_s = 0.5, β_l = 0.995). 2  Online curvature   Every K = 64 optimisation steps estimate the layer’s largest Hessian eigenvalue λ̂_ℓ by one Hutchinson-powered iteration:   v ← Rademacher(‖W_ℓ‖),   g₁ ← ∂L/∂W_ℓ         (back-prop cached),   g₂ ← ∂L/∂W_ℓ ( W_ℓ + εv )       (one extra fw/bw pass with ε=1e-3‖W_ℓ‖/‖v‖),   λ̂_ℓ = ⟨g₂ − g₁ , v⟩ / ε .   Cost: one extra backward every 64 steps. 3  Dual-criteria LR   Let μ_slow,ℓ = (v_l − m_l²)/(‖m_l‖² + ε); set   η_ℓ = κ / ( √μ_slow,ℓ + α λ̂_ℓ ) ,   with κ=1 (noise-free optimum) and α=0.3 a *single* global constant. 4  Trust-region guard   Clip per-step log change of η_ℓ by ±0.2 during first 300 updates. 5  Self-freezing   If λ̂_ℓ<λ_freeze (2e-4) *and* μ_slow,ℓ<μ_freeze (1e-5) for 256 steps, set η_ℓ=0. 6  Batch-size reflex   When median μ_fast across active layers <5e-4 double grad-acc steps once. No other hyper-parameters are exposed – α, β_s, β_l, κ fixed a-priori.",
+        "experimental_design": {
+          "experiment_summary": "The experiment fine-tunes the 0.6-billion-parameter Qwen-3 model on the GSM8K mathematical-reasoning corpus to demonstrate that the proposed Layer-wise Adaptive Noise-Curvature Estimation for LR (LANCER) scheduler outperforms an established “zero-sweep’’ baseline (DTND).  Each run is carried out in three tuning modes (full-parameter fp16, LoRA r=64, bias-only) on 8×A100-80 GB GPUs.  The workflow is:\n1. Data loading: tokenise GSM8K train set, pack into 16-sample sequences of 2,048 tokens, enable dynamic gradient-accumulation so the effective batch can grow when LANCER lowers noise estimates.\n2. Model initialisation: load Qwen-3-0.6B with the appropriate PEFT adapter (if any) and convert to fp16.\n3. Optimiser set-up: AdamW (β1 0.9, β2 0.95, weight-decay 0.01) with learning-rate left at the default 1.0e-4; the real step size is supplied layer-wise by LANCER.\n4. Scheduler: attach the LANCER class that maintains short-/long-horizon moment EMAs, performs a Hutchinson powered top-eigenvalue estimate every 64 steps, computes ηℓ = κ/(√μslow,ℓ + αλ̂ℓ) (κ = 1, α = 0.3) under a logarithmic trust-region guard, and can freeze layers when both curvature and noise stay below small fixed thresholds.  A median fast-noise trigger automatically doubles gradient-accumulation once per run if training becomes evidently sample-size limited.\n5. Training loop: for each batch run forward, loss, backward; call lancer.after_backward() (which at eigenvalue steps injects a single stochastic probe pass), then lancer.step(); repeat until an equalised wall-budget of 240 GPU-hours is consumed.\n6. Evaluation: after every 5 GPU-hours measure greedy accuracy on GSM8K dev; after the budget is exhausted record ‘contamination-free GSM1k’ (the official hidden test split) accuracy.  Also log SVAMP accuracy (zero-shot transfer), GPU hours, number of divergence events, and proportion of frozen layers.\n7. Baseline: repeat the identical protocol but replace LANCER with DTND scheduler, keeping AdamW and all other settings unchanged.\nThe comparison therefore isolates the influence of the adaptive noise-plus-curvature schedule while holding model, optimiser, data pipeline, seeds (3), and compute budget constant.",
+          "evaluation_metrics": [
+            "Contamination-free GSM1k greedy accuracy after equalised 240 GPU-hours.",
+            "SVAMP greedy accuracy",
+            "GPU-hours consumed",
+            "Divergence count",
+            "Fraction of layers frozen"
+          ],
+          "proposed_method": "LANCER (Layer-wise Adaptive Noise-Curvature Estimation for LR) is an on-line learning-rate scheduler that simultaneously models gradient noise and local curvature on a per-layer basis, producing a closed-form step size with no manual sweeps.\n1. Moment statistics: For every weight matrix Wℓ maintain short-(βs=0.5) and long-horizon (βl=0.995) EMAs of the first and second gradient moments (m_s, v_s, m_l, v_l).\n2. Curvature estimation: Every K=64 optimisation steps draw a Rademacher probe vector v, perturb Wℓ by ε = 1e-3‖Wℓ‖/‖v‖, and perform one extra forward-backward pass to obtain g₂; the largest Hessian eigenvalue is approximated by λ̂ℓ = ⟨g₂ − g₁, v⟩/ε.  This adds ~1.6 % compute averaged over steps.\n3. Learning-rate rule: Define slow noise μslow,ℓ = (v_l − m_l²)/(‖m_l‖² + ε).  The layer LR is ηℓ = κ/(√μslow,ℓ + αλ̂ℓ) with fixed κ = 1 and global α = 0.3, unifying noise and curvature control.\n4. Trust-region: During the first 300 optimisation steps the log of ηℓ is clipped to change at most ±0.2 to avoid instability.\n5. Self-freezing: If for 256 consecutive steps λ̂ℓ < 2e-4 and μslow,ℓ < 1e-5 the layer is deemed converged and its LR is set to zero, saving memory and compute.\n6. Batch-size reflex: When the median short-window noise across active layers drops below 5e-4 once, gradient-accumulation steps are doubled to exploit additional sample parallelism.\nBecause all constants are fixed a-priori, LANCER eliminates hand-tuning while adapting to both flat-noisy and sharp-curvature regions that cause failure in previous SNR-only schedules.",
+          "comparative_methods": [
+            "DTND (Signal-to-Noise Ratio Tuner with Decoupled Trust Region)"
+          ],
+          "models_to_use": [
+            "Qwen3-0.6B"
+          ],
+          "datasets_to_use": [
+            "gsm8k"
+          ],
+          "hyperparameters_to_search": {
+            "alpha (curvature weight)": "0.2-0.4",
+            "K (curvature update interval)": "32,64,128",
+            "gradient_accumulation_steps_initial": "4,8,16"
+          }
+        },
+        "experiment_runs": [
+          {
+            "run_id": "proposed-iter1-Qwen3-0.6B-gsm8k",
+            "method_name": "proposed",
+            "model_name": "Qwen3-0.6B",
+            "dataset_name": "gsm8k"
+          },
+          {
+            "run_id": "comparative-1-iter1-Qwen3-0.6B-gsm8k",
+            "method_name": "comparative-1",
+            "model_name": "Qwen3-0.6B",
+            "dataset_name": "gsm8k"
+          }
+        ]
       }
     ]
   }
