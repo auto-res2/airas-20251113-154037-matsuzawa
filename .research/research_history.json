@@ -760,6 +760,11 @@
       "expected_result": "LANCER reaches ≥61 % GSM1k accuracy (+2 pp over DTND, +3 pp over cosine) with full-tuning and 59 % with LoRA while matching DTND’s compute. No divergent runs were observed across 9 seeds. On SVAMP it attains 57 % (vs 54 % DTND). About 45 % of layers are auto-frozen in bias-only mode, saving 40 % backward memory. Extra Hutchinson passes add <6 % wall-time.",
       "expected_conclusion": "Combining unbiased curvature (top Hessian eigenvalue) with slow-scale gradient noise yields a single closed-form LR that adapts to both flat-noisy and sharp regimes, eliminates hand-tuned constants, and decides when parameters can be frozen. LANCER therefore advances ‘zero-sweep’ optimisation from noise-only control to principled noise-plus-curvature control, improving stability, accuracy and energy efficiency for Qwen-scale fine-tuning and opening a path towards theoretically grounded, scale-invariant schedulers for LLMs."
     },
-    "iterations": []
+    "iterations": [
+      {
+        "iteration_id": 1,
+        "method": "LANCER – Layer-wise Adaptive Noise-Curvature Estimation for LR 1  Running statistics   For every trainable matrix W_ℓ keep (as in DTND) short- and long-horizon EMA of first/second gradient moments m_s,v_s and m_l,v_l (β_s = 0.5, β_l = 0.995). 2  Online curvature   Every K = 64 optimisation steps estimate the layer’s largest Hessian eigenvalue λ̂_ℓ by one Hutchinson-powered iteration:   v ← Rademacher(‖W_ℓ‖),   g₁ ← ∂L/∂W_ℓ         (back-prop cached),   g₂ ← ∂L/∂W_ℓ ( W_ℓ + εv )       (one extra fw/bw pass with ε=1e-3‖W_ℓ‖/‖v‖),   λ̂_ℓ = ⟨g₂ − g₁ , v⟩ / ε .   Cost: one extra backward every 64 steps. 3  Dual-criteria LR   Let μ_slow,ℓ = (v_l − m_l²)/(‖m_l‖² + ε); set   η_ℓ = κ / ( √μ_slow,ℓ + α λ̂_ℓ ) ,   with κ=1 (noise-free optimum) and α=0.3 a *single* global constant. 4  Trust-region guard   Clip per-step log change of η_ℓ by ±0.2 during first 300 updates. 5  Self-freezing   If λ̂_ℓ<λ_freeze (2e-4) *and* μ_slow,ℓ<μ_freeze (1e-5) for 256 steps, set η_ℓ=0. 6  Batch-size reflex   When median μ_fast across active layers <5e-4 double grad-acc steps once. No other hyper-parameters are exposed – α, β_s, β_l, κ fixed a-priori."
+      }
+    ]
   }
 }
